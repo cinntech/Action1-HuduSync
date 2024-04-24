@@ -11,4 +11,4 @@ Version: 1.0
 Creation Date: 2024-04-24
 #>
 
-
+Test-AppLockerPolicy
