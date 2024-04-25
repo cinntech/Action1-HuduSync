@@ -12,6 +12,30 @@ Author: Wallace Cinnamon | CinnTech
 Version: 1.0
 Creation Date: 2024-04-24
 #>
+if ($PSVersionTable.PSVersion.Major -lt 7) {
+    Write-Host "This script requires PowerShell 7 or higher." -ForegroundColor Red
+	$pwshPath = Get-Command pwsh -ErrorAction SilentlyContinue
+    if ($pwshPath) {
+        $scriptPath = $PSCommandPath
+        $runCommand = "pwsh -File `"$scriptPath`""
+        Write-Host "You can try running this script with PowerShell 7 using the following command:" -ForegroundColor Yellow
+        Write-Host $runCommand -ForegroundColor Yellow
+        Write-Host "Press Enter to continue with PowerShell 7 or any other key to exit." -ForegroundColor Cyan
+        $userInput = Read-Host
+        if ($userInput -eq '') {
+            & pwsh -File $scriptPath
+            exit
+        }
+    } else {
+        Write-Host "PowerShell 7 is not detected on this system. Do you want to open the download page for PowerShell 7? (Y/N)" -ForegroundColor Yellow
+        $downloadConsent = Read-Host
+        if ($downloadConsent -eq 'Y') {
+            Start-Process "https://github.com/PowerShell/PowerShell/releases/latest"
+        }
+        Write-Host "Please install PowerShell 7 and rerun this script." -ForegroundColor Yellow
+    }														  
+    exit
+}
 
 function Get-OrInstall-Module {
     param([string]$ModuleName)
@@ -44,6 +68,7 @@ function Get-OrInstall-Module {
 }
 
 $modules = @("HuduAPI", "PSAction1")
+
 foreach ($mod in $modules) {
     if (-not (Get-OrInstall-Module -ModuleName $mod)) {
         Write-Host "Critical error with module $mod, exiting script."
@@ -51,41 +76,17 @@ foreach ($mod in $modules) {
     }
 }
 
-if ($PSVersionTable.PSVersion.Major -lt 7) {
-    Write-Host "This script requires PowerShell 7 or higher." -ForegroundColor Red
-	$pwshPath = Get-Command pwsh -ErrorAction SilentlyContinue
-    if ($pwshPath) {
-        $scriptPath = $PSCommandPath
-        $runCommand = "pwsh -File `"$scriptPath`""
-        Write-Host "You can try running this script with PowerShell 7 using the following command:" -ForegroundColor Yellow
-        Write-Host $runCommand -ForegroundColor Yellow
-        Write-Host "Press Enter to continue with PowerShell 7 or any other key to exit." -ForegroundColor Cyan
-        $userInput = Read-Host
-        if ($userInput -eq '') {
-            & pwsh -File $scriptPath
-            exit
-        }
-    } else {
-        Write-Host "PowerShell 7 is not detected on this system. Do you want to open the download page for PowerShell 7? (Y/N)" -ForegroundColor Yellow
-        $downloadConsent = Read-Host
-        if ($downloadConsent -eq 'Y') {
-            Start-Process "https://github.com/PowerShell/PowerShell/releases/latest"
-        }
-        Write-Host "Please install PowerShell 7 and rerun this script." -ForegroundColor Yellow
-    }														  
-    exit
-}
 
 
 
 function Initialize-HuduEnvironment {
     param(
-        [string]$ApiKeyPlainText,
+        [string]$HuduApiKeyPlainText,
         [string]$HuduBaseDomain
     )
     try {
-        # Assume New-HuduAPIKey and New-HuduBaseUrl are valid commands or placeholders for your actual functionality
-        New-HuduAPIKey -ApiKey $ApiKeyPlainText
+        $HuduBaseDomain = $HuduBaseDomain -replace '(\.com).*$', '$1'
+        New-HuduAPIKey -ApiKey $HuduApiKeyPlainText
         New-HuduBaseUrl -BaseUrl $HuduBaseDomain
         Write-Output "Hudu environment setup complete."
     } catch {
@@ -93,6 +94,9 @@ function Initialize-HuduEnvironment {
         exit
     }
 }
+
+
+
 
 function Initialize-Action1Environment {
     param([string]$ApiKey, [string]$Secret, [string]$OrgID)
@@ -199,7 +203,7 @@ $ActionOneApiSecretKey = ConvertTo-PlainText -SecureString $secureActionOneApiSe
 $HuduApiKey = ConvertTo-PlainText -SecureString $secureHuduApiKey
 
 
-$HuduBaseDomain = Read-Host "Enter your Hudu base domain (e.g., https://your.hudu.domain/api/v1) or press Enter to use default"
+$HuduBaseDomain = Read-Host "Enter your Hudu base domain (e.g., https://your.hudu.domain/api/v1) or press Enter to use CinnTech's"
 
 if (-not $HuduBaseDomain) {
     $HuduBaseDomain = "https://cinntech.huducloud.com/api/v1/"
@@ -213,12 +217,10 @@ $headers = @{
     "Accept" = "application/json"
 }
 
-$Region = Read-Host "Enter your Action1 Region (e.g., NorthAmerica,Europe) or press Enter to use default"
+$Region = Read-Host "Enter your Action1 Region (e.g., NorthAmerica,Europe) or press Enter to use CinnTech's"
 if (-not $Region) {
     $Region = "NorthAmerica"
 }
-
-#Initialize-HuduEnvironment -HuduApiKeyPlainText $HuduApiKey -HuduBaseDomain $HuduBaseDomain
 
 $ActionOneOrgID = Get-OrganizationIdNumber -companyName $companyName -headers $headers -HuduBaseDomain $HuduBaseDomain
 if (-not $ActionOneOrgID) {
@@ -231,29 +233,80 @@ if (-not $ActionOneOrgID) {
 #Write-Host $ActionOneApiSecretKey
 
 Initialize-Action1Environment -ApiKey $ActionOneApiKey -Secret $ActionOneApiSecretKey -OrgID $ActionOneOrgID -Region $Region
+Initialize-HuduEnvironment -HuduApiKeyPlainText $HuduApiKey -HuduBaseDomain $HuduBaseDomain
 
-#Get-Action1 -Query Endpoints | select -First 1
-
-try {
-#Get Endpoints
-$endpoints = Get-Action1 -Query "Endpoints"
-$endpointDetails = [System.Collections.Generic.List[object]]::new()
-foreach ($endpoint in $endpoints) {
-    $details = [PSCustomObject]@{
-        Name = $endpoint.name
-        Brand = if ([string]::IsNullOrWhiteSpace($endpoint.manufacturer)) { "Other" } else { $endpoint.manufacturer }
-        HardDriveSize = $endpoint.disk
-        ServiceTag = $endpoint.serial
-        Memory = $endpoint.RAM
-        OperatingSystem = $endpoint.OS
+function Get-EndpointDetails {
+    try {
+        $endpoints = Get-Action1 -Query "Endpoints"
+        $endpointDetails = [System.Collections.Generic.List[object]]::new()
+        foreach ($endpoint in $endpoints) {
+            if (-not $endpoint.name) {
+                Write-Warning "Received an endpoint without a name: $(ConvertTo-Json $endpoint)"
+                continue
+            }
+            $details = [PSCustomObject]@{
+                Name = $endpoint.name
+                Brand = if ([string]::IsNullOrWhiteSpace($endpoint.manufacturer)) { "Other" } else { $endpoint.manufacturer }
+                HardDriveSize = $endpoint.disk
+                ServiceTag = $endpoint.serial
+                Memory = $endpoint.RAM
+                OperatingSystem = $endpoint.OS
+            }
+            $endpointDetails.Add($details)
+            Write-Output "Processed endpoint: $($details.Name)"
+        }
+        return $endpointDetails
+    } catch {
+        Write-Error "An error occurred during endpoint details fetching: $($_.Exception.Message)"
+        return $null
     }
-    $endpointDetails.Add($details)
-    Write-Output "Endpoint: $($details.Name)"
-    $details | Format-List *
 }
-$endpointDetails | Export-Csv "EndpointDetails.csv" -NoTypeInformation
-Write-Output "Endpoint details exported successfully."
+
+#Hudu Create Assets
+try {
+    $Company = Get-HuduCompanies -Name $companyName
+    if (-not $Company) {
+        Write-Host "Company not found: $CompanyName" -ForegroundColor Red
+        return
+    }
+
+    $AssetLayoutName = "Computer Assets"
+    $Layout = Get-HuduAssetLayouts -Name $AssetLayoutName
+    if (-not $Layout) {
+        Write-Host "Creating new asset layout: $AssetLayoutName"
+        $NewLayoutFields = @{
+            'Brand' = 'Text'; 'Model' = 'Text'; 'Memory' = 'Text';
+            'Hard Drive Size' = 'Text'; 'Service Tag' = 'Text'; 
+            'Operating System' = 'Text'; 'Warranty Expiration' = 'Date'
+        }
+        $Layout = New-HuduAssetLayout -Name $AssetLayoutName -Fields $NewLayoutFields -Icon "fas fa-laptop" -Color "red" -IconColor "blue" -IncludePasswords $False -IncludePhotos $False -IncludeComments $False -IncludeFiles $False
+        if (-not $Layout) {
+            Write-Host "Failed to create or retrieve asset layout: $AssetLayoutName" -ForegroundColor Red
+            return
+        }
+    }
+
+    $endpointDetails = Get-EndpointDetails
+    foreach ($endpoint in $endpointDetails) {
+        if ([string]::IsNullOrWhiteSpace($endpoint.Name)) {
+            Write-Host "Warning: Endpoint name is empty, skipping this asset creation."
+            continue
+        }
+
+        Write-Host "Creating new asset: $($endpoint.Name)"
+        $AssetFields = @{
+            'Brand' = $endpoint.Brand; 'Memory' = $endpoint.Memory;
+            'Hard Drive Size' = $endpoint.HardDriveSize; 'Service Tag' = $endpoint.ServiceTag;
+            'Operating System' = $endpoint.OperatingSystem;
+        }
+        $NewAsset = New-HuduAsset -Name $endpoint.Name -CompanyId $Company.id -AssetLayoutId $Layout.id -Fields $AssetFields
+        if ($NewAsset) {
+            Write-Host "Asset created successfully under the company: $CompanyName" -ForegroundColor Green
+        } else {
+            Write-Host "Failed to create asset: $($endpoint.Name)" -ForegroundColor Red
+        }
+    }
 } catch {
-Write-Error "An error occurred during script execution: $($_.Exception.Message)"
+    Write-Error "An error occurred during script execution: $($_.Exception.Message)"
 }
 
