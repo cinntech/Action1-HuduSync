@@ -67,7 +67,7 @@ function Invoke-HuduApiRequest {
 $encodedCompanyName = [System.Net.WebUtility]::UrlEncode($companyName)
 
 # Invoke the Hudu API to search for the company
-$response = Invoke-HuduApiRequest -Endpoint "/companies?name=$encodedCompanyName" -ApiKey $apiKey
+$response = Invoke-HuduApiRequest -Endpoint "/companies?name=$encodedCompanyName" -ApiKey $apiKey -Headers $headers
 
 if ($response -and $response.companies -and $response.companies.count -gt 0) {
     $idNumber = $response.companies[0].id_number

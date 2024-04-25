@@ -1,15 +1,18 @@
 <#
 .SYNOPSIS
-This script fetches endpoint details from the Action1 platform based on a company name entered by the user, which retrieves the corresponding organization ID from Hudu. It will then create these assets in Hudu for the same company name.
+This script fetches endpoint details from the Action1 platform based on a company name entered by the user,
+which retrieves the corresponding organization ID from Hudu. It will then create these assets in Hudu for the same company name.
 
 .DESCRIPTION
-The script prompts the user for a Hudu API key, retrieves the corresponding Action1 organization ID from Hudu, and then retreives these from Action1 based on the A1 Org #. It will then put these assets into Hudu for the same client.
+The script prompts the user for a Hudu API key, retrieves the corresponding Action1 organization ID from Hudu,
+and then retrieves these from Action1 based on the A1 Org #. It will then put these assets into Hudu for the same client.
 
 .NOTES
 Author: Wallace Cinnamon | CinnTech
 Version: 1.0
 Creation Date: 2024-04-24
 #>
+
 function Get-OrInstall-Module {
     param([string]$ModuleName)
     $module = Get-Module -ListAvailable -Name $ModuleName
@@ -30,7 +33,6 @@ function Get-OrInstall-Module {
     } else {
         Write-Output "Module '$ModuleName' already installed."
     }
-
     try {
         Import-Module -Name $ModuleName
         Write-Output "Module '$ModuleName' loaded successfully."
@@ -41,7 +43,6 @@ function Get-OrInstall-Module {
     }
 }
 
-# Get-OrInstall Modules for Hudu and Action1
 $modules = @("HuduAPI", "PSAction1")
 foreach ($mod in $modules) {
     if (-not (Get-OrInstall-Module -ModuleName $mod)) {
@@ -50,10 +51,9 @@ foreach ($mod in $modules) {
     }
 }
 
-# Check if running PowerShell 7 or higher
 if ($PSVersionTable.PSVersion.Major -lt 7) {
     Write-Host "This script requires PowerShell 7 or higher." -ForegroundColor Red
-    $pwshPath = Get-Command pwsh -ErrorAction SilentlyContinue
+	$pwshPath = Get-Command pwsh -ErrorAction SilentlyContinue
     if ($pwshPath) {
         $scriptPath = $PSCommandPath
         $runCommand = "pwsh -File `"$scriptPath`""
@@ -72,19 +72,49 @@ if ($PSVersionTable.PSVersion.Major -lt 7) {
             Start-Process "https://github.com/PowerShell/PowerShell/releases/latest"
         }
         Write-Host "Please install PowerShell 7 and rerun this script." -ForegroundColor Yellow
-    }
+    }														  
     exit
 }
 
-# Function to get organization ID number (Action1 OrgID) from the company name in Hudu
+
+
+function Initialize-HuduEnvironment {
+    param(
+        [string]$ApiKeyPlainText,
+        [string]$HuduBaseDomain
+    )
+    try {
+        # Assume New-HuduAPIKey and New-HuduBaseUrl are valid commands or placeholders for your actual functionality
+        New-HuduAPIKey -ApiKey $ApiKeyPlainText
+        New-HuduBaseUrl -BaseUrl $HuduBaseDomain
+        Write-Output "Hudu environment setup complete."
+    } catch {
+        Write-Error "Hudu environment setup failed: $($_.Exception.Message)"
+        exit
+    }
+}
+
+function Initialize-Action1Environment {
+    param([string]$ApiKey, [string]$Secret, [string]$OrgID)
+    Set-Action1Region -Region $Region
+    Set-Action1DefaultOrg -Org_ID $OrgID
+    try {
+        Set-Action1Credentials -APIKey $ApiKey -Secret $Secret
+        Write-Output "Action1 API setup complete."
+    } catch {
+        Write-Error "Action1 API setup failed: $($_.Exception.Message)"
+        exit
+    }
+}
+
+
 function Get-OrganizationIdNumber {
-    param([string]$companyName)
-
+    param([string]$companyName, [hashtable]$headers,[string]$HuduBaseDomain)
     $encodedCompanyName = [uri]::EscapeDataString($companyName)
-    $uri = "$HuduBaseDomain/companies?name=$encodedCompanyName"    
-
-    Write-Host "Attempting to retrieve Organization ID from URI: $uri"  # Debug statement
-   
+    $uri = "$HuduBaseDomain/companies?name=$encodedCompanyName"
+    
+    #Debut Only
+    # Write-Host "Making API Request to URI: $uri with headers: $($headers | Out-String)"
     try {
         $response = Invoke-RestMethod -Uri $uri -Method Get -Headers $headers
         if ($response.companies -and $response.companies.Count -gt 0) {
@@ -100,51 +130,13 @@ function Get-OrganizationIdNumber {
     }
 }
 
-function Initialize-ActionOneEnvironment {
-    param(
-        [string]$ActionOneApiKey,
-        [string]$ActionOneApiSecretKey,
-        [string]$ActionOneOrgID,
-        [string]$Region
-    )
-    try {
-        # Simulated function call
-        Set-Action1Region -Region $Region
-        Set-Action1DefaultOrg -Org_ID $ActionOneOrgID
-        Set-Action1Credentials -APIKey $ActionOneApiKey -Secret $ActionOneApiSecretKey
-        Write-Output "Action1 environment setup complete."
-    } catch {
-        Write-Error "Action1 environment setup failed: $($_.Exception.Message)"
-        exit
-    }
-}
-
-# Function to initialize the Hudu environment
-function Initialize-HuduEnvironment {
-    param(
-        [string]$HuduApiKeyPlainText,  
-        [string]$HuduBaseDomain
-    )
-
-    try {
-        New-HuduAPIKey -ApiKey $HuduApiKeyPlainText  
-        New-HuduBaseUrl -BaseUrl $HuduBaseDomain
-        Write-Output "Hudu environment setup complete."
-    } catch {
-        Write-Error "Hudu environment setup failed: $($_.Exception.Message)"
-        exit
-    }
-}
-
-# Function to perform Hudu API requests
 function Invoke-HuduApiRequest {
     param (
         [string]$Endpoint,
-        [string]$HuduApiKey
+        [string]$HuduApiKey,
+        [hashtable]$Headers
     )
-
     $uri = "$HuduBaseDomain$Endpoint"
-
     try {
         $response = Invoke-RestMethod -Uri $uri -Method Get -Headers $headers
         return $response
@@ -154,118 +146,114 @@ function Invoke-HuduApiRequest {
     }
 }
 
-# Transforms SecureString to plain text using BSTR for secure handling and cleanup of sensitive data.
+# Use this function to convert SecureString to plain text securely
 function ConvertTo-PlainText {
     param (
-        [Parameter(Mandatory = $true)]
-        [System.Security.SecureString]
-        $SecureString
+        [System.Security.SecureString]$SecureString
     )
-
     $bstr = [System.Runtime.InteropServices.Marshal]::SecureStringToBSTR($SecureString)
     try {
         $plainText = [System.Runtime.InteropServices.Marshal]::PtrToStringAuto($bstr)
-    }
-    finally {
+    } finally {
         [System.Runtime.InteropServices.Marshal]::ZeroFreeBSTR($bstr)
+    }
+    if ([string]::IsNullOrWhiteSpace($plainText)) {
+        Write-Error "Converted text is null or empty."
+        exit
     }
     return $plainText
 }
 
-# Initializes logging by creating a log file directory and adding a start entry with an optional custom path.
 function Initialize-Logging {
     [CmdletBinding()]
     param (
         [string]$LogFile = "$(Join-Path -Path $PSScriptRoot -ChildPath 'huduComputerAssetCreation.log')"
     )
-
-    # Get user input for log file path or use the default
     $logPath = Read-Host "Enter path for the log file or press Enter to use default ($LogFile)"
     if (-not $logPath) {
         $logPath = $LogFile
     }
-
-    # Ensure the directory for the log file exists
     $logDirectory = Split-Path -Path $logPath -Parent
     if (-not (Test-Path -Path $logDirectory)) {
         New-Item -ItemType Directory -Path $logDirectory -Force
     }
-
-    # Start logging
     Add-Content -Path $logPath -Value "$(Get-Date) - Script started"
 }
 
-#############
-# Uncomment the below to Initialize Logging. 
- Initialize-Logging
-#############
+# Initialize Logging
+#Initialize-Logging
 
 # Define constants or configurable parameters at the start
-$HuduBaseDomain = "https://cinntech.huducloud.com/api/v1//"
+$HuduBaseDomain = "https://cinntech.huducloud.com/api/v1/"
 $Region = "NorthAmerica"
 
-# Define headers
+
+$companyName = Read-Host -Prompt 'Enter the company name as it is Shown in Hudu'
+$secureActionOneApiKey = Read-Host "Enter your Action1 API key (starts with 'api-key-') for $companyName" -AsSecureString
+$secureActionOneApiSecretKey = Read-Host "Enter your Action1 API key Secret for $companyName" -AsSecureString
+$secureHuduApiKey = Read-Host "Enter your Hudu API key" -AsSecureString
+#
+
+$ActionOneApiKey = ConvertTo-PlainText -SecureString $secureActionOneApiKey
+$ActionOneApiSecretKey = ConvertTo-PlainText -SecureString $secureActionOneApiSecretKey
+$HuduApiKey = ConvertTo-PlainText -SecureString $secureHuduApiKey
+
+
+$HuduBaseDomain = Read-Host "Enter your Hudu base domain (e.g., https://your.hudu.domain/api/v1) or press Enter to use default"
+
+if (-not $HuduBaseDomain) {
+    $HuduBaseDomain = "https://cinntech.huducloud.com/api/v1/"
+}
+
+$HuduApiKey = ConvertTo-PlainText -SecureString $secureHuduApiKey
+
 $headers = @{
     "x-api-key" = $HuduApiKey
     "Content-Type" = "application/json"
     "Accept" = "application/json"
 }
 
-# Prompt the user for the company name
-$companyName= Read-Host -Prompt 'Enter the company name as it is Shown in Hudu'
-
-#Setup Action1 Api
-$secureActionOneApiKey = Read-Host "Enter your Action1 API key (starts with 'api-key-') for $companyName" -AsSecureString
-$ActionOneApiKey = ConvertTo-PlainText -SecureString $secureActionOneApiKey
-
-$secureActionOneApiSecretKey = Read-Host "Enter your Action1 API key Secret for $companyName" -AsSecureString
-$ActionOneApiSecretKey = ConvertTo-PlainText -SecureString $secureActionOneApiSecretKey
-
-# Setup Hudu Api
-$secureHuduApiKey = Read-Host "Enter your Hudu API key" -AsSecureString
-$HuduApiKey = ConvertTo-PlainText -SecureString $secureHuduApiKey
-
-# Optionally override the base domain
-$HuduBaseDomain = Read-Host "Enter your Hudu base domain (e.g., https://your.hudu.domain/api/v1) or press Enter to use default"
-if (-not $HuduBaseDomain) {
-    $HuduBaseDomain = "https://cinntech.huducloud.com/api/v1"
-}
-
-# Optionally override the Region
 $Region = Read-Host "Enter your Action1 Region (e.g., NorthAmerica,Europe) or press Enter to use default"
 if (-not $Region) {
     $Region = "NorthAmerica"
 }
 
-# ActionOneOrgID fetched 
-$ActionOneOrgID = Get-OrganizationIdNumber -companyName $CompanyName
+#Initialize-HuduEnvironment -HuduApiKeyPlainText $HuduApiKey -HuduBaseDomain $HuduBaseDomain
+
+$ActionOneOrgID = Get-OrganizationIdNumber -companyName $companyName -headers $headers -HuduBaseDomain $HuduBaseDomain
 if (-not $ActionOneOrgID) {
     Write-Host "Unable to retrieve Organization ID, terminating script."
     exit
 }
+## Debug Only
+#Write-Host $ActionOneOrgID
+#Write-Host $ActionOneApiKey
+#Write-Host $ActionOneApiSecretKey
 
-# Call the function to initialize the environment
+Initialize-Action1Environment -ApiKey $ActionOneApiKey -Secret $ActionOneApiSecretKey -OrgID $ActionOneOrgID -Region $Region
+
+#Get-Action1 -Query Endpoints | select -First 1
+
 try {
-    Write-Host $ActionOneOrgID
-    Initialize-HuduEnvironment -HuduApiKeyPlainText $HuduApiKey -BaseDomain $HuduBaseDomain
-    Initialize-ActionOneEnvironment -ApiKey $ActionOneApiKey -Secret $ActionOneApiSecretKey -Region $Region -OrgID $ActionOneOrgID
- 
-
-
-    # Perform an HuduAPI request
-    $response = Invoke-HuduApiRequest -Endpoint "/companies?name=$encodedCompanyName" -ApiKey $HuduApiKey
-    if ($response) {
-        Write-Host "Hudu API Request Successful: " -ForegroundColor Green
-        Write-Output $response
-    } else {
-        Write-Host "Hudu API Request Failed or No Data Found."
+#Get Endpoints
+$endpoints = Get-Action1 -Query "Endpoints"
+$endpointDetails = [System.Collections.Generic.List[object]]::new()
+foreach ($endpoint in $endpoints) {
+    $details = [PSCustomObject]@{
+        Name = $endpoint.name
+        Brand = if ([string]::IsNullOrWhiteSpace($endpoint.manufacturer)) { "Other" } else { $endpoint.manufacturer }
+        HardDriveSize = $endpoint.disk
+        ServiceTag = $endpoint.serial
+        Memory = $endpoint.RAM
+        OperatingSystem = $endpoint.OS
     }
-} catch {
-    Write-Error "An unexpected error occurred: $($_.Exception.Message)"
+    $endpointDetails.Add($details)
+    Write-Output "Endpoint: $($details.Name)"
+    $details | Format-List *
 }
-
-## company name needs to be converted to company id - or not working right.
-
-
-
+$endpointDetails | Export-Csv "EndpointDetails.csv" -NoTypeInformation
+Write-Output "Endpoint details exported successfully."
+} catch {
+Write-Error "An error occurred during script execution: $($_.Exception.Message)"
+}
 
