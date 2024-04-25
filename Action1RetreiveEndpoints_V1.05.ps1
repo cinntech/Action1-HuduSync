@@ -12,8 +12,7 @@ Creation Date: 2024-04-23
 #>
 
 # Configuration and defaults
-$HuduBaseUri = "https://cinntech.huducloud.com/api/v1/"
-$Region = "NorthAmerica"
+
 
 # Function to get organization ID by company name from Hudu
 function Get-OrganizationId {
@@ -21,10 +20,13 @@ function Get-OrganizationId {
 
     $encodedCompanyName = [uri]::EscapeDataString($companyName)
     $uri = "$HuduBaseUri/companies?name=$encodedCompanyName"
-
+    
+    Write-Host "Attempting to retrieve Organization ID from URI: $uri"  # Debug statement
+    
     try {
         $response = Invoke-RestMethod -Uri $uri -Method Get -Headers $headers
         if ($response.companies -and $response.companies.Count -gt 0) {
+            Write-Host "Organization ID retrieved: $($response.companies[0].id_number)"
             return $response.companies[0].id_number
         } else {
             Write-Host "No company found with the name '$companyName'. Please verify the name and try again."
@@ -81,6 +83,10 @@ function Read-SecureInput($prompt) {
     }
     return $unsecureString
 }
+
+$HuduBaseUri = "https://cinntech.huducloud.com/api/v1/"
+
+$Region = "NorthAmerica"
 
 # Main script execution
 try {
